@@ -1,0 +1,18 @@
+# Global ownership
+* @nn-dma/platform-engineering
+
+# Action definition
+action.yml @nn-dma/platform-engineering @nn-dma/action-maintainers
+
+# Documentation
+README.md @nn-dma/platform-engineering @nn-dma/documentation-team
+doc/ @nn-dma/documentation-team
+
+# CI/CD workflows
+.github/workflows/ @nn-dma/platform-engineering @nn-dma/ci-cd-team
+
+# Tests
+test/ @nn-dma/platform-engineering @nn-dma/qa-team
+
+# Release management
+.github/workflows/release.yml @nn-dma/platform-engineering @nn-dma/release-managers

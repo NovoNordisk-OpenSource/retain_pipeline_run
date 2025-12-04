@@ -1,0 +1,271 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  validate_tag:
+    name: Validate Release Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      is_prerelease: ${{ steps.extract.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: extract
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "Full tag: $TAG_NAME"
+
+          # Extract version (remove 'v' prefix)
+          VERSION=${TAG_NAME#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Check if this is a prerelease (contains alpha, beta, rc)
+          if echo "$VERSION" | grep -qE "(alpha|beta|rc)"; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "This is a prerelease: $VERSION"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "This is a stable release: $VERSION"
+          fi
+
+      - name: Validate semantic versioning
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+
+          # Check if version follows semantic versioning
+          if ! echo "$VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$"; then
+            echo "❌ Invalid semantic version: $VERSION"
+            echo "Expected format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]"
+            exit 1
+          fi
+
+          echo "✅ Valid semantic version: $VERSION"
+
+  run_tests:
+    name: Run Full Test Suite
+    runs-on: ubuntu-latest
+    needs: validate_tag
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run CI pipeline
+        uses: ./.github/workflows/ci.yml
+
+  build_release_artifacts:
+    name: Build Release Artifacts
+    runs-on: ubuntu-latest
+    needs: [validate_tag, run_tests]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create release package
+        run: |
+          mkdir -p release-artifacts
+
+          # Create a release package with action files
+          tar -czf release-artifacts/retain-artifacts-${{ needs.validate_tag.outputs.version }}.tar.gz \
+            action.yml \
+            README.md \
+            LICENSE \
+            --transform 's,^,retain-artifacts-${{ needs.validate_tag.outputs.version }}/,'
+
+          # Create checksums
+          cd release-artifacts
+          sha256sum *.tar.gz > checksums.txt
+          cd ..
+
+          # Generate release notes
+          echo "# Retain Artifacts Action v${{ needs.validate_tag.outputs.version }}" > release-artifacts/RELEASE_NOTES.md
+          echo "" >> release-artifacts/RELEASE_NOTES.md
+
+          if [ "${{ needs.validate_tag.outputs.is_prerelease }}" = "true" ]; then
+            echo "⚠️ **This is a pre-release version**" >> release-artifacts/RELEASE_NOTES.md
+            echo "" >> release-artifacts/RELEASE_NOTES.md
+          fi
+
+          echo "## 🚀 Changes in this Release" >> release-artifacts/RELEASE_NOTES.md
+          echo "" >> release-artifacts/RELEASE_NOTES.md
+
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            echo "### Commits since $LAST_TAG:" >> release-artifacts/RELEASE_NOTES.md
+            git log --pretty=format:"- %s (%h)" $LAST_TAG..HEAD >> release-artifacts/RELEASE_NOTES.md
+          else
+            echo "### Initial Release" >> release-artifacts/RELEASE_NOTES.md
+            echo "This is the initial release of the Retain Artifacts Action." >> release-artifacts/RELEASE_NOTES.md
+          fi
+
+          echo "" >> release-artifacts/RELEASE_NOTES.md
+          echo "" >> release-artifacts/RELEASE_NOTES.md
+          echo "## 📖 Usage" >> release-artifacts/RELEASE_NOTES.md
+          echo "" >> release-artifacts/RELEASE_NOTES.md
+          echo '```yaml' >> release-artifacts/RELEASE_NOTES.md
+          echo 'steps:' >> release-artifacts/RELEASE_NOTES.md
+          echo '  - name: Retain Pipeline Artifacts' >> release-artifacts/RELEASE_NOTES.md
+          echo '    uses: innersource-nn/retain-artifacts@v${{ needs.validate_tag.outputs.version }}' >> release-artifacts/RELEASE_NOTES.md
+          echo '    with:' >> release-artifacts/RELEASE_NOTES.md
+          echo '      github_token: ${{ secrets.GITHUB_TOKEN }}' >> release-artifacts/RELEASE_NOTES.md
+          echo '```' >> release-artifacts/RELEASE_NOTES.md
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts/
+
+  create_github_release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate_tag, run_tests, build_release_artifacts]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts/
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v${{ needs.validate_tag.outputs.version }}"
+          RELEASE_NAME="Retain Artifacts Action ${{ needs.validate_tag.outputs.version }}"
+
+          # Read release notes
+          RELEASE_BODY=$(cat release-artifacts/RELEASE_NOTES.md)
+
+          # Prepare release command
+          RELEASE_ARGS=(
+            "$TAG_NAME"
+            "--title" "$RELEASE_NAME"
+            "--notes" "$RELEASE_BODY"
+          )
+
+          if [ "${{ needs.validate_tag.outputs.is_prerelease }}" = "true" ]; then
+            RELEASE_ARGS+=("--prerelease")
+          fi
+
+          # Create the release
+          gh release create "${RELEASE_ARGS[@]}"
+
+          # Upload release artifacts
+          gh release upload "$TAG_NAME" release-artifacts/*.tar.gz
+          gh release upload "$TAG_NAME" release-artifacts/checksums.txt
+
+          echo "✅ GitHub release created: $TAG_NAME"
+          echo "🔗 Release URL: $(gh release view $TAG_NAME --json url -q .url)"
+
+  test_release:
+    name: Test Release
+    runs-on: ubuntu-latest
+    needs: [validate_tag, create_github_release]
+    steps:
+      - name: Test released action
+        id: test_release
+        uses: innersource-nn/retain-artifacts@v${{ needs.validate_tag.outputs.version }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_name: "Release Test - v${{ needs.validate_tag.outputs.version }}"
+          release_body: |
+            ## 🧪 Release Test
+
+            This release was created to test the newly released retain-artifacts action v${{ needs.validate_tag.outputs.version }}.
+
+            **Test Details:**
+            - Release Version: v${{ needs.validate_tag.outputs.version }}
+            - Test Run: ${{ github.run_id }}
+            - Prerelease: ${{ needs.validate_tag.outputs.is_prerelease }}
+
+            This test verifies that the action works correctly after release.
+          prerelease: true
+
+      - name: Verify release test
+        run: |
+          echo "## 🎉 Release Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Tested**: v${{ needs.validate_tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release ID**: ${{ steps.test_release.outputs.release_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL**: ${{ steps.test_release.outputs.release_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Release test completed successfully!"
+
+  update_major_tag:
+    name: Update Major Version Tag
+    runs-on: ubuntu-latest
+    needs: [validate_tag, test_release]
+    if: needs.validate_tag.outputs.is_prerelease == 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update major version tag
+        run: |
+          VERSION="${{ needs.validate_tag.outputs.version }}"
+          MAJOR_VERSION=$(echo "$VERSION" | cut -d. -f1)
+
+          echo "Updating major version tag: v$MAJOR_VERSION"
+
+          # Create or update the major version tag
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Safety check before force push
+          if git ls-remote --exit-code --tags origin "v$MAJOR_VERSION" >/dev/null 2>&1; then
+            echo "⚠️  Tag v$MAJOR_VERSION already exists, updating to point to v$VERSION"
+          else
+            echo "✓ Creating new tag v$MAJOR_VERSION pointing to v$VERSION"
+          fi
+
+          git tag -fa "v$MAJOR_VERSION" -m "Update v$MAJOR_VERSION to point to v$VERSION"
+          git push origin "v$MAJOR_VERSION" --force
+
+          echo "✅ Updated v$MAJOR_VERSION tag to point to v$VERSION"
+
+  notify_success:
+    name: Notify Success
+    runs-on: ubuntu-latest
+    needs: [validate_tag, create_github_release, test_release]
+    if: always() && needs.create_github_release.result == 'success'
+    steps:
+      - name: Generate success summary
+        run: |
+          echo "## 🎉 Release v${{ needs.validate_tag.outputs.version }} Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Release Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: v${{ needs.validate_tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type**: ${{ needs.validate_tag.outputs.is_prerelease == 'true' && 'Pre-release' || 'Stable Release' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL**: [View Release](https://github.com/innersource-nn/retain-artifacts/releases/tag/v${{ needs.validate_tag.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Completed Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Version validation" >> $GITHUB_STEP_SUMMARY
+          echo "- Full test suite execution" >> $GITHUB_STEP_SUMMARY
+          echo "- Release artifacts creation" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub release publication" >> $GITHUB_STEP_SUMMARY
+          echo "- Release functionality testing" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.validate_tag.outputs.is_prerelease }}" = "false" ]; then
+            echo "- Major version tag update" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "The action is now available for use:" >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          echo 'uses: innersource-nn/retain-artifacts@v${{ needs.validate_tag.outputs.version }}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

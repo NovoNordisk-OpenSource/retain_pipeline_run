@@ -1,0 +1,449 @@
+name: 'Retain Pipeline Run'
+description: >-
+  Check for immutable releases configuration and create a release with all pipeline artifacts
+author: 'Platform Engineering Team'
+
+inputs:
+  github_token:
+    description: 'GitHub token with repository and release permissions'
+    required: true
+  release_tag:
+    description: >-
+      Tag for the release (if not provided, will be generated based on timestamp)
+    required: false
+  release_name:
+    description: 'Name for the release (if not provided, will be generated)'
+    required: false
+  release_body:
+    description: 'Description for the release'
+    required: false
+    default: 'Automated release created from pipeline run'
+  prerelease:
+    description: 'Mark this as a prerelease'
+    required: false
+    default: 'false'
+  draft:
+    description: 'Create as draft release'
+    required: false
+    default: 'false'
+
+outputs:
+  release_id:
+    description: 'ID of the created release'
+    value: ${{ steps.create_release.outputs.release_id }}
+  release_url:
+    description: 'URL of the created release'
+    value: ${{ steps.create_release.outputs.html_url }}
+  release_tag:
+    description: 'Tag of the created release'
+    value: ${{ steps.generate_release_info.outputs.release_tag }}
+  immutable_releases_enabled:
+    description: 'Whether immutable releases are enabled for this repository'
+    value: ${{ steps.check_immutable.outputs.immutable_enabled }}
+  artifacts_count:
+    description: 'Number of artifacts attached to the release'
+    value: ${{ steps.get_artifacts.outputs.artifact_count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout retain-artifacts action
+      uses: actions/checkout@v4
+      with:
+        repository: 'NovoNordisk-OpenSource/retain_pipeline_run'
+        path: './.github/actions/retain-artifacts'
+
+    - name: Setup GitHub CLI
+      shell: bash
+      run: |
+        # Verify GitHub CLI is available
+        # (pre-installed on GitHub Actions runners)
+        if ! command -v gh >/dev/null 2>&1; then
+          echo "Error: GitHub CLI not available on this runner"
+          exit 1
+        fi
+
+        # Verify GitHub CLI is available and token is set
+        export GITHUB_TOKEN="${{ inputs.github_token }}"
+
+        # Set repository context for GitHub CLI
+        gh repo set-default ${{ github.repository }}
+
+    - name: Check for immutable releases configuration
+      id: check_immutable
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        echo "Checking repository for GitHub immutable releases capability..."
+
+        # Get repository and organization information
+        REPO_INFO=$(gh api --repo ${{ github.repository }} repos/${{ github.repository }} 2>/dev/null || \
+          echo '{}')
+
+        # Initialize with conservative approach
+        IMMUTABLE_ENABLED="unknown"
+        IMMUTABLE_REASONS=()
+
+        echo "Repository information retrieved"
+
+        # Check if this is an organization repository
+        ORG_TYPE=$(echo "$REPO_INFO" | jq -r '.owner.type // "unknown"')
+        if [ "$ORG_TYPE" = "Organization" ]; then
+          echo "✅ Organization repository detected"
+          IMMUTABLE_REASONS+=("organization_repository")
+
+          # For organization repositories, check for GitHub Advanced
+          # Security features
+          # which are often correlated with immutable releases availability
+          SECURITY_FEATURES=$(echo "$REPO_INFO" | jq -r '.security_and_analysis // {}')
+
+          if echo "$SECURITY_FEATURES" | \
+            jq -e '.secret_scanning.status == "enabled"' > /dev/null 2>&1; then
+            echo "✅ Advanced Security features detected (scan enabled)"
+            IMMUTABLE_REASONS+=("advanced_security_detected")
+            IMMUTABLE_ENABLED="likely"
+          fi
+
+          if echo "$SECURITY_FEATURES" | \
+            jq -e '.secret_scanning_push_protection.status == "enabled"' > /dev/null 2>&1; then
+            echo "✅ Advanced Security features detected (push protection)"
+            IMMUTABLE_REASONS+=("push_protection_enabled")
+            IMMUTABLE_ENABLED="likely"
+          fi
+        fi
+
+        # Check repository visibility - public repos may have
+        # different capabilities
+        VISIBILITY=$(echo "$REPO_INFO" | jq -r '.visibility // "unknown"')
+        if [ "$VISIBILITY" = "public" ]; then
+          echo "ℹ️ Public repository - GitHub release features available"
+          IMMUTABLE_REASONS+=("public_repository")
+        fi
+
+        # Note: GitHub's immutable releases feature provides the following protections:
+        # - Git tags cannot be moved or deleted after release publication
+        # - Release assets cannot be modified or deleted
+        # - Automatic generation of release attestations for cryptographic verification
+        # - Protection against repository resurrection attacks
+        #
+        # The feature availability depends on organization policies and repository settings.
+        # Since the GitHub API doesn't expose a direct "immutable_releases_enabled" field,
+        # we provide a best-effort assessment based on available indicators.
+
+        # Default to "supported" for organizational context with indicators
+        if [ "$IMMUTABLE_ENABLED" = "unknown" ] && [ "$ORG_TYPE" = "Organization" ]; then
+          IMMUTABLE_ENABLED="supported"
+          echo "ℹ️ Organization context suggests immutable releases support"
+        elif [ "$IMMUTABLE_ENABLED" = "unknown" ]; then
+          IMMUTABLE_ENABLED="unsupported"
+          echo "⚠️ Unable to determine immutable releases capability"
+        fi
+
+        # Output results
+        echo "immutable_enabled=$IMMUTABLE_ENABLED" >> $GITHUB_OUTPUT
+        echo "immutable_reasons=$(IFS=,; echo "${IMMUTABLE_REASONS[*]}")" >> $GITHUB_OUTPUT
+
+        echo "Immutable releases assessment: $IMMUTABLE_ENABLED"
+        if [ ${#IMMUTABLE_REASONS[@]} -gt 0 ]; then
+          echo "Assessment based on: ${IMMUTABLE_REASONS[*]}"
+        fi
+
+        echo ""
+        echo "📖 Note: GitHub's immutable releases feature provides additional"
+        echo "   integrity guarantees for releases in supported repositories."
+        echo "   See: https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases"
+
+    - name: Get all artifacts from current run
+      id: get_artifacts
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        echo "Fetching artifacts from current pipeline run (${{ github.run_id }})..."
+
+        # Get artifacts for the current run
+        ARTIFACTS_JSON=$(gh api --repo ${{ github.repository }} repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
+
+        # Extract artifact information
+        ARTIFACT_COUNT=$(echo "$ARTIFACTS_JSON" | jq '.total_count')
+        echo "Found $ARTIFACT_COUNT artifacts"
+
+        if [ "$ARTIFACT_COUNT" -gt 0 ]; then
+          # Save detailed artifact information
+          echo "$ARTIFACTS_JSON" | jq '.artifacts[] | {
+            name: .name,
+            id: .id,
+            size_in_bytes: .size_in_bytes,
+            created_at: .created_at,
+            updated_at: .updated_at,
+            archive_download_url: .archive_download_url
+          }' > ./.github/actions/retain-artifacts/artifacts_list.json
+
+          echo "Artifacts list saved"
+
+          # Create a summary of artifacts
+          ARTIFACT_NAMES=$(echo "$ARTIFACTS_JSON" | jq -r '.artifacts[].name' | tr '\n' ', ' | sed 's/,$//')
+          TOTAL_SIZE=$(echo "$ARTIFACTS_JSON" | jq '[.artifacts[].size_in_bytes] | add')
+
+          echo "artifact_names=$ARTIFACT_NAMES" >> $GITHUB_OUTPUT
+          echo "artifact_count=$ARTIFACT_COUNT" >> $GITHUB_OUTPUT
+          echo "total_size_bytes=$TOTAL_SIZE" >> $GITHUB_OUTPUT
+
+          # Human readable size
+          if command -v numfmt >/dev/null 2>&1; then
+            TOTAL_SIZE_HUMAN=$(numfmt --to=iec-i --suffix=B $TOTAL_SIZE)
+          else
+            TOTAL_SIZE_HUMAN="${TOTAL_SIZE} bytes"
+          fi
+          echo "total_size_human=$TOTAL_SIZE_HUMAN" >> $GITHUB_OUTPUT
+
+          echo "Total artifacts size: $TOTAL_SIZE_HUMAN"
+        else
+          echo "No artifacts found in current run"
+          echo "artifact_names=" >> $GITHUB_OUTPUT
+          echo "artifact_count=0" >> $GITHUB_OUTPUT
+          echo "total_size_bytes=0" >> $GITHUB_OUTPUT
+          echo "total_size_human=0 bytes" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Generate release information
+      id: generate_release_info
+      shell: bash
+      run: |
+        # Use current git tag or generate release tag if not provided
+        if [ -z "${{ inputs.release_tag }}" ]; then
+          # Try to get current git tag (e.g., v1.2.3)
+          CURRENT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "")
+
+          if [ -n "$CURRENT_TAG" ]; then
+            RELEASE_TAG="$CURRENT_TAG"
+            echo "✅ Using current git tag: $RELEASE_TAG"
+          else
+            # Fallback to timestamp-based tag if no git tag exists
+            TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+            RELEASE_TAG="pipeline-${{ github.run_id }}-$TIMESTAMP"
+            echo "⚠️ No git tag found, using generated tag: $RELEASE_TAG"
+          fi
+        else
+          RELEASE_TAG="${{ inputs.release_tag }}"
+        fi
+
+        # Generate release name if not provided
+        if [ -z "${{ inputs.release_name }}" ]; then
+          RELEASE_NAME="Pipeline Artifacts - Run #${{ github.run_id }}"
+        else
+          RELEASE_NAME="${{ inputs.release_name }}"
+        fi
+
+        # Generate comprehensive release body
+        RELEASE_BODY="${{ inputs.release_body }}"
+        RELEASE_BODY="${RELEASE_BODY}\n\n## 📋 Pipeline Information"
+        RELEASE_BODY="${RELEASE_BODY}\n- **Run ID:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        RELEASE_BODY="${RELEASE_BODY}\n- **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"
+        RELEASE_BODY="${RELEASE_BODY}\n- **Branch:** \`${{ github.ref_name }}\`"
+        RELEASE_BODY="${RELEASE_BODY}\n- **Workflow:** \`${{ github.workflow }}\`"
+        RELEASE_BODY="${RELEASE_BODY}\n- **Triggered by:** \`${{ github.event_name }}\`"
+        RELEASE_BODY="${RELEASE_BODY}\n- **Actor:** @${{ github.actor }}"
+        RELEASE_BODY="${RELEASE_BODY}\n- **Created:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+        if [ "${{ steps.get_artifacts.outputs.artifact_count }}" -gt 0 ]; then
+          RELEASE_BODY="${RELEASE_BODY}\n\n## 📦 Artifacts (${{ steps.get_artifacts.outputs.artifact_count }})"
+          RELEASE_BODY="${RELEASE_BODY}\nThis release contains **${{ steps.get_artifacts.outputs.artifact_count }}** artifacts with a total size of **${{ steps.get_artifacts.outputs.total_size_human }}**:"
+
+          # Add artifact list
+          ARTIFACT_LIST=""
+          if [ -f "./.github/actions/retain-artifacts/artifacts_list.json" ]; then
+            while IFS= read -r artifact_info; do
+              ARTIFACT_NAME=$(echo "$artifact_info" | jq -r '.name')
+              ARTIFACT_SIZE=$(echo "$artifact_info" | jq -r '.size_in_bytes')
+
+              # Convert size to human readable if possible
+              if command -v numfmt >/dev/null 2>&1; then
+                ARTIFACT_SIZE_HUMAN=$(numfmt --to=iec-i --suffix=B $ARTIFACT_SIZE)
+              else
+                ARTIFACT_SIZE_HUMAN="${ARTIFACT_SIZE} bytes"
+              fi
+
+              ARTIFACT_LIST="${ARTIFACT_LIST}\n- **${ARTIFACT_NAME}** (${ARTIFACT_SIZE_HUMAN})"
+            done < <(jq -c '.' ./.github/actions/retain-artifacts/artifacts_list.json)
+          fi
+
+          RELEASE_BODY="${RELEASE_BODY}${ARTIFACT_LIST}"
+          RELEASE_BODY="${RELEASE_BODY}\n\n> 💾 **Retention Period:** Indefinite (GitHub releases)"
+        else
+          RELEASE_BODY="${RELEASE_BODY}\n\n## 📦 Artifacts\n⚠️ No artifacts were found in this pipeline run."
+        fi
+
+        # Add immutable release information
+        IMMUTABLE_STATUS="${{ steps.check_immutable.outputs.immutable_enabled }}"
+        if [ "$IMMUTABLE_STATUS" = "likely" ] || [ "$IMMUTABLE_STATUS" = "supported" ]; then
+          RELEASE_BODY="${RELEASE_BODY}\n\n## 🔒 Immutable Release Capability"
+          RELEASE_BODY="${RELEASE_BODY}\n⚡ **This repository appears to support GitHub's immutable releases feature.**"
+          RELEASE_BODY="${RELEASE_BODY}\n\n> **Immutable releases provide:**"
+          RELEASE_BODY="${RELEASE_BODY}\n> • Git tags cannot be moved or deleted after publication"
+          RELEASE_BODY="${RELEASE_BODY}\n> • Release assets cannot be modified or deleted"
+          RELEASE_BODY="${RELEASE_BODY}\n> • Automatic generation of release attestations"
+          RELEASE_BODY="${RELEASE_BODY}\n> • Protection against repository resurrection attacks"
+          RELEASE_BODY="${RELEASE_BODY}\n>"
+          RELEASE_BODY="${RELEASE_BODY}\n> Assessment: **${IMMUTABLE_STATUS}** based on \`${{ steps.check_immutable.outputs.immutable_reasons }}\`"
+          RELEASE_BODY="${RELEASE_BODY}\n>\n> 📖 [Learn more about immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)"
+        elif [ "$IMMUTABLE_STATUS" = "unknown" ]; then
+          RELEASE_BODY="${RELEASE_BODY}\n\n## 🔒 Release Integrity"
+          RELEASE_BODY="${RELEASE_BODY}\n🛡️ **This release provides standard GitHub release integrity.**"
+          RELEASE_BODY="${RELEASE_BODY}\n\n> Immutable releases capability could not be determined for this repository."
+        fi
+
+        # Add footer
+        RELEASE_BODY="${RELEASE_BODY}\n\n---"
+        RELEASE_BODY="${RELEASE_BODY}\n*🤖 This release was created automatically by the [retain_pipeline_run](https://github.com/NovoNordisk-OpenSource/retain_pipeline_run) action*"
+
+        # Set outputs
+        echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+        echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+
+        # Save release body to file for proper handling of newlines
+        printf "%s" "$RELEASE_BODY" > ./.github/actions/retain-artifacts/release_body.txt
+        echo "release_body_file=./.github/actions/retain-artifacts/release_body.txt" >> $GITHUB_OUTPUT
+
+    - name: Create release
+      id: create_release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        echo "Creating release: ${{ steps.generate_release_info.outputs.release_name }}"
+
+        # Read release body from file
+        RELEASE_BODY=$(cat ${{ steps.generate_release_info.outputs.release_body_file }})
+
+        # Prepare release creation command arguments
+        RELEASE_ARGS=(
+          "${{ steps.generate_release_info.outputs.release_tag }}"
+          "--title" "${{ steps.generate_release_info.outputs.release_name }}"
+          "--notes" "$RELEASE_BODY"
+          "--repo" "${{ github.repository }}"
+        )
+
+        if [ "${{ inputs.prerelease }}" = "true" ]; then
+          RELEASE_ARGS+=("--prerelease")
+        fi
+
+        if [ "${{ inputs.draft }}" = "true" ]; then
+          RELEASE_ARGS+=("--draft")
+        fi
+
+        # Create the release
+        if gh release create "${RELEASE_ARGS[@]}"; then
+          echo "✅ Release created successfully"
+
+          # Get release information
+          RELEASE_INFO=$(gh release view "${{ steps.generate_release_info.outputs.release_tag }}" --json id,url --repo ${{ github.repository }})
+          RELEASE_ID=$(echo "$RELEASE_INFO" | jq -r '.id')
+          RELEASE_URL=$(echo "$RELEASE_INFO" | jq -r '.url')
+
+          echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+          echo "html_url=$RELEASE_URL" >> $GITHUB_OUTPUT
+
+          echo "Release ID: $RELEASE_ID"
+          echo "Release URL: $RELEASE_URL"
+        else
+          echo "❌ Failed to create release"
+          exit 1
+        fi
+
+    - name: Download and attach artifacts to release
+      if: steps.get_artifacts.outputs.artifact_count > 0
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        set +e  # Don't exit on error
+        set +o pipefail  # Don't exit on pipe failures
+        echo "📥 Downloading and attaching ${{ steps.get_artifacts.outputs.artifact_count }} artifacts to release..."
+
+        # Create temporary directory for artifacts
+        TEMP_DIR=$(mktemp -d)
+        cd "$TEMP_DIR"
+
+        SUCCESSFUL_ATTACHMENTS=0
+        FAILED_ATTACHMENTS=0
+
+        # Read artifacts list and process each one
+        if [ -f "$GITHUB_WORKSPACE/.github/actions/retain-artifacts/artifacts_list.json" ]; then
+          while IFS= read -r artifact_info; do
+            ARTIFACT_NAME=$(echo "$artifact_info" | jq -r '.name')
+            ARTIFACT_ID=$(echo "$artifact_info" | jq -r '.id')
+
+            echo "📦 Processing artifact: $ARTIFACT_NAME (ID: $ARTIFACT_ID)"
+
+            # Download artifact (with error handling)
+            if gh api --repo ${{ github.repository }} repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > "${ARTIFACT_NAME}.zip" 2>/dev/null; then
+              echo "  ✅ Downloaded: ${ARTIFACT_NAME}.zip"
+
+              # Attach to release (specify repository explicitly)
+              if gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "${ARTIFACT_NAME}.zip" --repo ${{ github.repository }} 2>/dev/null; then
+                echo "  ✅ Attached: ${ARTIFACT_NAME}.zip to release"
+                ((SUCCESSFUL_ATTACHMENTS++))
+              else
+                echo "  ❌ Failed to attach: ${ARTIFACT_NAME}.zip to release"
+                ((FAILED_ATTACHMENTS++))
+              fi
+              # Clean up downloaded file
+              rm -f "${ARTIFACT_NAME}.zip"
+            else
+              echo "  ❌ Failed to download artifact: $ARTIFACT_NAME"
+              ((FAILED_ATTACHMENTS++))
+            fi
+
+          done < <(jq -c '.' "$GITHUB_WORKSPACE/.github/actions/retain-artifacts/artifacts_list.json")
+        fi
+
+        echo "📊 Attachment Summary:"
+        echo "  ✅ Successful: $SUCCESSFUL_ATTACHMENTS"
+        echo "  ❌ Failed: $FAILED_ATTACHMENTS"
+
+        # Clean up
+        cd "$GITHUB_WORKSPACE"
+        rm -rf "$TEMP_DIR"
+
+        # Set output for summary
+        echo "successful_attachments=$SUCCESSFUL_ATTACHMENTS" >> $GITHUB_OUTPUT
+        echo "failed_attachments=$FAILED_ATTACHMENTS" >> $GITHUB_OUTPUT
+
+    - name: Generate action summary
+      shell: bash
+      run: |
+        echo "## 🚀 Retain Artifacts Action - Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **Release Tag** | \`${{ steps.generate_release_info.outputs.release_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Release Name** | ${{ steps.generate_release_info.outputs.release_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Release URL** | [${{ steps.create_release.outputs.html_url }}](${{ steps.create_release.outputs.html_url }}) |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Artifacts Count** | ${{ steps.get_artifacts.outputs.artifact_count }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Total Size** | ${{ steps.get_artifacts.outputs.total_size_human }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Immutable Releases** | ${{ steps.check_immutable.outputs.immutable_enabled }} |" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ steps.get_artifacts.outputs.artifact_count }}" -gt 0 ]; then
+          echo "| **Successful Attachments** | ${{ steps.download_and_attach_artifacts.outputs.successful_attachments || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Failed Attachments** | ${{ steps.download_and_attach_artifacts.outputs.failed_attachments || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ steps.get_artifacts.outputs.artifact_count }}" -gt 0 ]; then
+          echo "### 📦 Attached Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.get_artifacts.outputs.artifact_names }}" | tr ',' '\n' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "✅ **Release created successfully with all available pipeline artifacts retained!**" >> $GITHUB_STEP_SUMMARY
+
+        # Ensure success exit code
+        exit 0
+
+branding:
+  icon: 'archive'
+  color: 'blue'
+

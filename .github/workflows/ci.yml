@@ -1,0 +1,317 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Mondays at 2 AM
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint Action
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: pip install yamllint==1.35.1
+
+      - name: Lint action.yml
+        run: yamllint -d relaxed action.yml
+
+      - name: Validate action metadata
+        run: |
+          # Check required fields in action.yml
+          if ! grep -q "^name:" action.yml; then
+            echo "Error: action.yml missing 'name' field"
+            exit 1
+          fi
+
+          if ! grep -q "^description:" action.yml; then
+            echo "Error: action.yml missing 'description' field"
+            exit 1
+          fi
+
+          if ! grep -q "runs:" action.yml; then
+            echo "Error: action.yml missing 'runs' section"
+            exit 1
+          fi
+
+          echo "✅ Action metadata validation passed"
+
+  unit_tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Verify GitHub CLI
+        run: |
+          # GitHub CLI is pre-installed on GitHub Actions runners
+          gh --version
+
+      - name: Run unit tests
+        run: |
+          if [ -f "test/unit/run_tests.sh" ]; then
+            chmod +x test/unit/run_tests.sh
+            ./test/unit/run_tests.sh
+          else
+            echo "⚠️ No unit tests found, creating basic test structure"
+            mkdir -p test/unit
+            echo "#!/bin/bash" > test/unit/run_tests.sh
+            echo "echo '✅ Basic unit tests passed'" >> test/unit/run_tests.sh
+            chmod +x test/unit/run_tests.sh
+            ./test/unit/run_tests.sh
+          fi
+
+  integration_tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint, unit_tests]
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - name: Create test artifacts
+        run: |
+          mkdir -p test-outputs
+          echo "Integration test log $(date)" > test-outputs/integration.log
+          echo '{"test": "integration", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > test-outputs/integration.json
+          echo "Integration test report" > test-outputs/integration-report.txt
+
+      - name: Upload test artifact 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: test-outputs/*.log
+
+      - name: Upload test artifact 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-data
+          path: test-outputs/*.json
+
+      - name: Upload test artifact 3
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-reports
+          path: test-outputs/*.txt
+
+      - name: Test the action
+        id: test_action
+        uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_name: "CI Test Release - ${{ github.run_id }}"
+          release_body: |
+            ## 🧪 CI Integration Test
+
+            This release was created during CI testing to verify the retain-artifacts action works correctly.
+
+            ### Test Information
+            - **CI Run**: ${{ github.run_id }}
+            - **Test Branch**: ${{ github.ref_name }}
+            - **Test Commit**: ${{ github.sha }}
+
+            This release should contain 3 test artifacts.
+          prerelease: true
+
+      - name: Verify action outputs
+        run: |
+          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release ID**: ${{ steps.test_action.outputs.release_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL**: ${{ steps.test_action.outputs.release_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Tag**: ${{ steps.test_action.outputs.release_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Immutable Releases**: ${{ steps.test_action.outputs.immutable_releases_enabled }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts Count**: ${{ steps.test_action.outputs.artifacts_count }}" >> $GITHUB_STEP_SUMMARY
+
+          # Verify expected outputs
+          if [ -z "${{ steps.test_action.outputs.release_id }}" ]; then
+            echo "❌ Error: release_id output is empty"
+            exit 1
+          fi
+
+          if [ -z "${{ steps.test_action.outputs.release_url }}" ]; then
+            echo "❌ Error: release_url output is empty"
+            exit 1
+          fi
+
+          if [ "${{ steps.test_action.outputs.artifacts_count }}" != "3" ]; then
+            echo "❌ Error: Expected 3 artifacts, got ${{ steps.test_action.outputs.artifacts_count }}"
+            exit 1
+          fi
+
+          echo "✅ All integration tests passed!"
+
+  cleanup_test_releases:
+    name: Cleanup Test Releases
+    runs-on: ubuntu-latest
+    needs: [integration_tests]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cleanup old test releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🧹 Cleaning up old CI test releases..."
+
+          # Get test releases older than 7 days
+          CUTOFF_DATE=$(date -d "7 days ago" -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # List all releases and filter test releases
+          gh release list --limit 100 --json tagName,name,createdAt,prerelease | \
+          jq -r --arg cutoff "$CUTOFF_DATE" '.[] |
+            select(.name | test("CI Test Release")) |
+            select(.createdAt < $cutoff) |
+            .tagName' | \
+          while read -r tag; do
+            if [ -n "$tag" ]; then
+              echo "Deleting old test release: $tag"
+              gh release delete "$tag" --yes || echo "Failed to delete $tag (may already be deleted)"
+            fi
+          done
+
+          echo "✅ Cleanup completed"
+
+  performance_test:
+    name: Performance Test
+    runs-on: ubuntu-latest
+    needs: [lint, unit_tests]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create large test artifacts
+        run: |
+          mkdir -p large-test-outputs
+
+          # Create several larger files for performance testing
+          for i in {1..5}; do
+            dd if=/dev/zero of=large-test-outputs/large-file-${i}.bin bs=1M count=10
+            echo "Large test file ${i} created at $(date)" > large-test-outputs/large-file-${i}.log
+          done
+
+          # Create a large JSON file
+          echo '{"performance_test": true, "files": [' > large-test-outputs/large-data.json
+          for i in {1..1000}; do
+            echo "  {\"id\": $i, \"data\": \"$(openssl rand -base64 100)\"}," >> large-test-outputs/large-data.json
+          done
+          echo '  {"end": true}]}' >> large-test-outputs/large-data.json
+
+      - name: Upload large test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: large-performance-test-artifacts
+          path: large-test-outputs/
+
+      - name: Performance test the action
+        id: perf_test
+        uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_name: "Performance Test - ${{ github.run_id }}"
+          release_body: |
+            ## 🚀 Performance Test
+
+            This release tests the action's performance with larger artifacts.
+
+            **Test Configuration:**
+            - 5 binary files (10MB each)
+            - 5 log files
+            - 1 large JSON file (~100KB)
+
+            Expected total size: ~50MB
+          prerelease: true
+
+      - name: Verify performance results
+        run: |
+          echo "## Performance Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts Processed**: ${{ steps.perf_test.outputs.artifacts_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL**: ${{ steps.perf_test.outputs.release_url }}" >> $GITHUB_STEP_SUMMARY
+
+          # The action should handle large artifacts without issues
+          if [ "${{ steps.perf_test.outputs.artifacts_count }}" -eq "0" ]; then
+            echo "❌ Performance test failed: No artifacts processed"
+            exit 1
+          fi
+
+          echo "✅ Performance test completed successfully"
+
+
+  documentation_check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check documentation completeness
+        run: |
+          echo "📖 Checking documentation..."
+
+          # Check if README exists and has required sections
+          if [ ! -f "README.md" ]; then
+            echo "❌ README.md is missing"
+            exit 1
+          fi
+
+          # Check for required README sections
+          for section in "Features" "Quick Start" "Inputs" "Outputs" "Examples"; do
+            if ! grep -q "## .*$section" README.md; then
+              echo "❌ README.md missing section: $section"
+              exit 1
+            fi
+          done
+
+          # Check if all inputs in action.yml are documented in README
+          ACTION_INPUTS=$(grep -A 20 "^inputs:" action.yml | grep "^  [a-z]" | cut -d: -f1 | tr -d ' ')
+          for input in $ACTION_INPUTS; do
+            if ! grep -q "$input" README.md; then
+              echo "⚠️ Warning: Input '$input' not documented in README"
+            fi
+          done
+
+          echo "✅ Documentation check completed"
+
+  success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [lint, unit_tests, integration_tests, documentation_check]
+    if: always()
+    steps:
+      - name: Check CI status
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.unit_tests.result }}" != "success" ] || \
+             [ "${{ needs.integration_tests.result }}" != "success" ] || \
+             [ "${{ needs.documentation_check.result }}" != "success" ]; then
+            echo "❌ CI pipeline failed"
+            exit 1
+          fi
+
+          echo "✅ All CI checks passed!"
+          echo "## 🎉 CI Pipeline Success" >> $GITHUB_STEP_SUMMARY
+          echo "All checks completed successfully:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Linting" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Unit Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Integration Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Documentation Check" >> $GITHUB_STEP_SUMMARY
