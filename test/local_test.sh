@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Local development test script for retain-artifacts action
+# Local development test script for retain_pipeline_run action
 # This script simulates the action locally for development and debugging
 
 set -e
@@ -16,7 +16,7 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🧪 Local Development Test for Retain Artifacts Action${NC}"
+echo -e "${BLUE}🧪 Local Development Test for Retain Pipeline Run Action${NC}"
 echo "======================================================"
 
 # Set up test environment variables
@@ -221,7 +221,7 @@ fi
 RELEASE_BODY="${RELEASE_BODY}\n\n## 🔒 Immutable Release"
 RELEASE_BODY="${RELEASE_BODY}\n⚡ **This release benefits from GitHub's immutable releases capability.**"
 RELEASE_BODY="${RELEASE_BODY}\n\n---"
-RELEASE_BODY="${RELEASE_BODY}\n*🤖 This release was created automatically by the [retain-artifacts](https://github.com/NovoNordisk-OpenSource/retain_pipeline_run) action*"
+RELEASE_BODY="${RELEASE_BODY}\n*🤖 This release was created automatically by the [retain_pipeline_run](https://github.com/NovoNordisk-OpenSource/retain_pipeline_run) action*"
 
 echo -e "  ${CYAN}Release Body Preview:${NC}"
 printf "%s\n" "$RELEASE_BODY" | head -20 | sed 's/^/    /'

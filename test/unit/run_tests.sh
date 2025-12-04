@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Unit test suite for retain-artifacts action
+# Unit test suite for retain_pipeline_run action
 # Tests individual components and logic without external dependencies
 
 set -e
@@ -315,7 +315,7 @@ test_gh_commands() {
 
 # Main test execution
 main() {
-    echo -e "${BLUE}🚀 Starting Retain Artifacts Action Unit Tests${NC}"
+    echo -e "${BLUE}🚀 Starting Retain Pipeline Run Action Unit Tests${NC}"
     echo "=============================================="
 
     # Check prerequisites

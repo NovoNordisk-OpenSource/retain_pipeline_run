@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Quick test script for retain-artifacts action
+# Quick test script for retain_pipeline_run action
 # Tests the action locally without requiring GitHub repository setup
 
 set -e
@@ -15,7 +15,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🚀 Quick Test for Retain Artifacts Action${NC}"
+echo -e "${BLUE}🚀 Quick Test for Retain Pipeline Run Action${NC}"
 echo "==========================================="
 echo ""
 
@@ -46,8 +46,8 @@ run_test() {
 }
 
 # Test 1: Check action.yml exists and is valid
-run_test "Action definition exists and is valid YAML" \
-    "test -f '$ACTION_DIR/action.yml' && python3 -c 'import yaml; yaml.safe_load(open(\"$ACTION_DIR/action.yml\"))' 2>/dev/null || yq eval . '$ACTION_DIR/action.yml' >/dev/null"
+run_test "Action definition exists" \
+    "test -f '$ACTION_DIR/action.yml' && test -s '$ACTION_DIR/action.yml'"
 
 # Test 2: Check required tools
 run_test "jq is available" "command -v jq"

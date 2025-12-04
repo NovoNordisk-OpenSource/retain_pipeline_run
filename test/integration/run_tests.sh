@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Integration test suite for retain-artifacts action
+# Integration test suite for retain_pipeline_run action
 # Tests the complete action workflow with real GitHub API interactions
 
 set -e
@@ -436,7 +436,7 @@ test_error_scenarios() {
 
 # Main test execution
 main() {
-    echo -e "${BLUE}🚀 Starting Retain Artifacts Action Integration Tests${NC}"
+    echo -e "${BLUE}🚀 Starting Retain Pipeline Run Action Integration Tests${NC}"
     echo "====================================================="
     echo ""
     echo "Configuration:"
@@ -483,7 +483,7 @@ show_usage() {
     echo "Options:"
     echo "  -h, --help        Show this help message"
     echo "  --dry-run         Run tests without creating real releases"
-    echo "  --repo REPO       Override test repository (default: NovoNordisk-OpenSource/retain_pipeline_run-test)"
+    echo "  --repo REPO       Override test repository (default: NovoNordisk-OpenSource/retain_pipeline_run)"
     echo ""
     echo "Environment Variables:"
     echo "  GITHUB_TOKEN      GitHub token for API access (required for full tests)"
