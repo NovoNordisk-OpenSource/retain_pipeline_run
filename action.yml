@@ -394,12 +394,14 @@ runs:
             if gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > "${ARTIFACT_NAME}.zip" 2>/dev/null; then
               echo "  ✅ Downloaded: ${ARTIFACT_NAME}.zip"
 
-              # Attach to release (specify repository explicitly)
-              if gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "${ARTIFACT_NAME}.zip" 2>/dev/null; then
+              # Attach to release with detailed error reporting
+              UPLOAD_OUTPUT=$(gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "${ARTIFACT_NAME}.zip" 2>&1)
+              if [ $? -eq 0 ]; then
                 echo "  ✅ Attached: ${ARTIFACT_NAME}.zip to release"
                 ((SUCCESSFUL_ATTACHMENTS++))
               else
                 echo "  ❌ Failed to attach: ${ARTIFACT_NAME}.zip to release"
+                echo "  Error details: $UPLOAD_OUTPUT"
                 ((FAILED_ATTACHMENTS++))
               fi
               # Clean up downloaded file
