@@ -78,7 +78,7 @@ runs:
         echo "Checking repository for GitHub immutable releases capability..."
 
         # Get repository and organization information
-        REPO_INFO=$(gh api --repo ${{ github.repository }} repos/${{ github.repository }} 2>/dev/null || \
+        REPO_INFO=$(gh api repos/${{ github.repository }} 2>/dev/null || \
           echo '{}')
 
         # Initialize with conservative approach
@@ -163,7 +163,7 @@ runs:
         echo "Fetching artifacts from current pipeline run (${{ github.run_id }})..."
 
         # Get artifacts for the current run
-        ARTIFACTS_JSON=$(gh api --repo ${{ github.repository }} repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
+        ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
 
         # Extract artifact information
         ARTIFACT_COUNT=$(echo "$ARTIFACTS_JSON" | jq '.total_count')
@@ -322,7 +322,6 @@ runs:
           "${{ steps.generate_release_info.outputs.release_tag }}"
           "--title" "${{ steps.generate_release_info.outputs.release_name }}"
           "--notes" "$RELEASE_BODY"
-          "--repo" "${{ github.repository }}"
         )
 
         if [ "${{ inputs.prerelease }}" = "true" ]; then
@@ -338,7 +337,7 @@ runs:
           echo "✅ Release created successfully"
 
           # Get release information
-          RELEASE_INFO=$(gh release view "${{ steps.generate_release_info.outputs.release_tag }}" --json id,url --repo ${{ github.repository }})
+          RELEASE_INFO=$(gh release view "${{ steps.generate_release_info.outputs.release_tag }}" --json id,url)
           RELEASE_ID=$(echo "$RELEASE_INFO" | jq -r '.id')
           RELEASE_URL=$(echo "$RELEASE_INFO" | jq -r '.url')
 
@@ -378,11 +377,11 @@ runs:
             echo "📦 Processing artifact: $ARTIFACT_NAME (ID: $ARTIFACT_ID)"
 
             # Download artifact (with error handling)
-            if gh api --repo ${{ github.repository }} repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > "${ARTIFACT_NAME}.zip" 2>/dev/null; then
+            if gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > "${ARTIFACT_NAME}.zip" 2>/dev/null; then
               echo "  ✅ Downloaded: ${ARTIFACT_NAME}.zip"
 
               # Attach to release (specify repository explicitly)
-              if gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "${ARTIFACT_NAME}.zip" --repo ${{ github.repository }} 2>/dev/null; then
+              if gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "${ARTIFACT_NAME}.zip" 2>/dev/null; then
                 echo "  ✅ Attached: ${ARTIFACT_NAME}.zip to release"
                 ((SUCCESSFUL_ATTACHMENTS++))
               else
