@@ -131,10 +131,10 @@ runs:
         # Since the GitHub API doesn't expose a direct "immutable_releases_enabled" field,
         # we provide a best-effort assessment based on available indicators.
 
-        # Default to "supported" for organizational context with indicators
+        # Default to conservative assessment - don't assume support
         if [ "$IMMUTABLE_ENABLED" = "unknown" ] && [ "$ORG_TYPE" = "Organization" ]; then
-          IMMUTABLE_ENABLED="supported"
-          echo "ℹ️ Organization context suggests immutable releases support"
+          IMMUTABLE_ENABLED="unsupported"
+          echo "⚠️ Unable to determine immutable releases capability"
         elif [ "$IMMUTABLE_ENABLED" = "unknown" ]; then
           IMMUTABLE_ENABLED="unsupported"
           echo "⚠️ Unable to determine immutable releases capability"
@@ -162,8 +162,22 @@ runs:
       run: |
         echo "Fetching artifacts from current pipeline run (${{ github.run_id }})..."
 
-        # Get artifacts for the current run
-        ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
+        # Get artifacts for the current run with error handling
+        if ! ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts 2>&1); then
+          echo "❌ Failed to fetch artifacts from GitHub API"
+          echo "Error: $ARTIFACTS_JSON"
+          echo ""
+          echo "This may be due to insufficient permissions. The GITHUB_TOKEN needs:"
+          echo "- actions: read (to access workflow artifacts)"
+          echo "- contents: write (to create releases)"
+          echo ""
+          echo "💡 Note: Some organization repositories may have additional restrictions."
+          echo "Consider using a personal access token with appropriate permissions."
+
+          # Set empty artifacts for graceful continuation
+          ARTIFACTS_JSON='{"total_count": 0, "artifacts": []}'
+          echo "⚠️ Continuing with empty artifacts list..."
+        fi
 
         # Extract artifact information
         ARTIFACT_COUNT=$(echo "$ARTIFACTS_JSON" | jq '.total_count')
