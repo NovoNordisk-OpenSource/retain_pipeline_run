@@ -1,0 +1,54 @@
+name: GitHub Action Test
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # Daily at 4 AM
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  test-action:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - name: Create test artifacts
+        run: |
+          mkdir -p test-artifacts
+          echo "Test content 1" > test-artifacts/test-file-1.txt
+          echo "Test content 2" > test-artifacts/test-file-2.txt
+          echo '{"test": "data"}' > test-artifacts/test-data.json
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-1
+          path: test-artifacts/test-file-1.txt
+
+      - name: Upload more test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts-2
+          path: test-artifacts/test-file-2.txt
+
+      - name: Upload JSON test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-data
+          path: test-artifacts/test-data.json
+
+      - name: Test retain_pipeline_run action
+        uses: NovoNordisk-OpenSource/retain_pipeline_run@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify action succeeded
+        run: |
+          echo "✅ GitHub Action test completed successfully"
+          echo "Check the releases page to verify artifacts were retained"
