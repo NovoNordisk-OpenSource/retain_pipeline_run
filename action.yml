@@ -69,90 +69,6 @@ runs:
         # Set repository context for GitHub CLI
         gh repo set-default ${{ github.repository }}
 
-    - name: Check for immutable releases configuration
-      id: check_immutable
-      shell: bash
-      env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
-      run: |
-        echo "Checking repository for GitHub immutable releases capability..."
-
-        # Get repository and organization information
-        REPO_INFO=$(gh api repos/${{ github.repository }} 2>/dev/null || \
-          echo '{}')
-
-        # Initialize with conservative approach
-        IMMUTABLE_ENABLED="unknown"
-        IMMUTABLE_REASONS=()
-
-        echo "Repository information retrieved"
-
-        # Check if this is an organization repository
-        ORG_TYPE=$(echo "$REPO_INFO" | jq -r '.owner.type // "unknown"')
-        if [ "$ORG_TYPE" = "Organization" ]; then
-          echo "✅ Organization repository detected"
-          IMMUTABLE_REASONS+=("organization_repository")
-
-          # For organization repositories, check for GitHub Advanced
-          # Security features
-          # which are often correlated with immutable releases availability
-          SECURITY_FEATURES=$(echo "$REPO_INFO" | jq -r '.security_and_analysis // {}')
-
-          if echo "$SECURITY_FEATURES" | \
-            jq -e '.secret_scanning.status == "enabled"' > /dev/null 2>&1; then
-            echo "✅ Advanced Security features detected (scan enabled)"
-            IMMUTABLE_REASONS+=("advanced_security_detected")
-            IMMUTABLE_ENABLED="likely"
-          fi
-
-          if echo "$SECURITY_FEATURES" | \
-            jq -e '.secret_scanning_push_protection.status == "enabled"' > /dev/null 2>&1; then
-            echo "✅ Advanced Security features detected (push protection)"
-            IMMUTABLE_REASONS+=("push_protection_enabled")
-            IMMUTABLE_ENABLED="likely"
-          fi
-        fi
-
-        # Check repository visibility - public repos may have
-        # different capabilities
-        VISIBILITY=$(echo "$REPO_INFO" | jq -r '.visibility // "unknown"')
-        if [ "$VISIBILITY" = "public" ]; then
-          echo "ℹ️ Public repository - GitHub release features available"
-          IMMUTABLE_REASONS+=("public_repository")
-        fi
-
-        # Note: GitHub's immutable releases feature provides the following protections:
-        # - Git tags cannot be moved or deleted after release publication
-        # - Release assets cannot be modified or deleted
-        # - Automatic generation of release attestations for cryptographic verification
-        # - Protection against repository resurrection attacks
-        #
-        # The feature availability depends on organization policies and repository settings.
-        # Since the GitHub API doesn't expose a direct "immutable_releases_enabled" field,
-        # we provide a best-effort assessment based on available indicators.
-
-        # Default to conservative assessment - don't assume support
-        if [ "$IMMUTABLE_ENABLED" = "unknown" ] && [ "$ORG_TYPE" = "Organization" ]; then
-          IMMUTABLE_ENABLED="unsupported"
-          echo "⚠️ Unable to determine immutable releases capability"
-        elif [ "$IMMUTABLE_ENABLED" = "unknown" ]; then
-          IMMUTABLE_ENABLED="unsupported"
-          echo "⚠️ Unable to determine immutable releases capability"
-        fi
-
-        # Output results
-        echo "immutable_enabled=$IMMUTABLE_ENABLED" >> $GITHUB_OUTPUT
-        echo "immutable_reasons=$(IFS=,; echo "${IMMUTABLE_REASONS[*]}")" >> $GITHUB_OUTPUT
-
-        echo "Immutable releases assessment: $IMMUTABLE_ENABLED"
-        if [ ${#IMMUTABLE_REASONS[@]} -gt 0 ]; then
-          echo "Assessment based on: ${IMMUTABLE_REASONS[*]}"
-        fi
-
-        echo ""
-        echo "📖 Note: GitHub's immutable releases feature provides additional"
-        echo "   integrity guarantees for releases in supported repositories."
-        echo "   See: https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases"
 
     - name: Get all artifacts from current run
       id: get_artifacts
@@ -293,8 +209,8 @@ runs:
           RELEASE_BODY=$(printf "%s\n\n## 📦 Artifacts\n⚠️ No artifacts were found in this pipeline run." "$RELEASE_BODY")
         fi
 
-        # Add immutable release information (check both initial detection and behavioral test)
-        IMMUTABLE_STATUS="${{ steps.test_immutable.outputs.immutable_enabled || steps.check_immutable.outputs.immutable_enabled }}"
+        # Add immutable release information from behavioral test
+        IMMUTABLE_STATUS="${{ steps.test_immutable.outputs.immutable_enabled }}"
         IMMUTABLE_CONFIRMED="${{ steps.test_immutable.outputs.immutable_confirmed }}"
 
         if [ "$IMMUTABLE_CONFIRMED" = "true" ] || [ "$IMMUTABLE_STATUS" = "confirmed" ]; then
@@ -526,7 +442,7 @@ runs:
         echo "| **Release URL** | [${{ steps.create_release.outputs.html_url }}](${{ steps.create_release.outputs.html_url }}) |" >> $GITHUB_STEP_SUMMARY
         echo "| **Artifacts Count** | ${{ steps.get_artifacts.outputs.artifact_count }} |" >> $GITHUB_STEP_SUMMARY
         echo "| **Total Size** | ${{ steps.get_artifacts.outputs.total_size_human }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Immutable Releases** | ${{ steps.test_immutable.outputs.immutable_enabled || steps.check_immutable.outputs.immutable_enabled }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Immutable Releases** | ${{ steps.test_immutable.outputs.immutable_enabled }} |" >> $GITHUB_STEP_SUMMARY
 
         if [ "${{ steps.get_artifacts.outputs.artifact_count }}" -gt 0 ]; then
           echo "| **Attachment Method** | Attached during release creation |" >> $GITHUB_STEP_SUMMARY
