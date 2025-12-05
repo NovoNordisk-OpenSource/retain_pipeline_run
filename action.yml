@@ -455,8 +455,10 @@ runs:
 
         # Attempt to upload test file to the main release - this will fail with HTTP 422 if immutable
         echo "  🔄 Testing asset upload to detect immutability on release: $RELEASE_TAG"
+        set +e  # Temporarily disable exit on error for upload test
         UPLOAD_OUTPUT=$(gh release upload "$RELEASE_TAG" immutable-test-file.txt 2>&1)
         UPLOAD_EXIT_CODE=$?
+        set -e  # Re-enable exit on error
 
         if [ $UPLOAD_EXIT_CODE -eq 0 ]; then
           echo "  ✅ Test file upload successful - releases are mutable"
@@ -467,7 +469,9 @@ runs:
 
           # Clean up the uploaded test file (possible in mutable releases)
           echo "  🧹 Cleaning up test file from mutable release..."
+          set +e  # Allow cleanup to fail without stopping the workflow
           gh release delete-asset "$RELEASE_TAG" immutable-test-file.txt 2>/dev/null || echo "  ⚠️ Could not delete test file asset"
+          set -e
         else
           echo "  📝 Upload failed, checking error:"
           echo "$UPLOAD_OUTPUT" | sed 's/^/     /'
