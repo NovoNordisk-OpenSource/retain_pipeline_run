@@ -251,22 +251,24 @@ runs:
         fi
 
         # Generate comprehensive release body using proper newlines
-        RELEASE_BODY="${{ inputs.release_body }}
-
-## 📋 Pipeline Information
-- **Run ID:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-- **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
-- **Branch:** \`${{ github.ref_name }}\`
-- **Workflow:** \`${{ github.workflow }}\`
-- **Triggered by:** \`${{ github.event_name }}\`
-- **Actor:** @${{ github.actor }}
-- **Created:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        RELEASE_BODY=$(printf "%s\n\n## 📋 Pipeline Information\n- **Run ID:** [%s](%s)\n- **Commit:** [\`%s\`](%s)\n- **Branch:** \`%s\`\n- **Workflow:** \`%s\`\n- **Triggered by:** \`%s\`\n- **Actor:** @%s\n- **Created:** %s" \
+          "${{ inputs.release_body }}" \
+          "${{ github.run_id }}" \
+          "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          "${{ github.sha }}" \
+          "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" \
+          "${{ github.ref_name }}" \
+          "${{ github.workflow }}" \
+          "${{ github.event_name }}" \
+          "${{ github.actor }}" \
+          "$(date -u '+%Y-%m-%d %H:%M:%S UTC')")
 
         if [ "${{ steps.get_artifacts.outputs.artifact_count }}" -gt 0 ]; then
-          RELEASE_BODY="${RELEASE_BODY}
-
-## 📦 Artifacts (${{ steps.get_artifacts.outputs.artifact_count }})
-This release contains **${{ steps.get_artifacts.outputs.artifact_count }}** artifacts with a total size of **${{ steps.get_artifacts.outputs.total_size_human }}**:"
+          RELEASE_BODY=$(printf "%s\n\n## 📦 Artifacts (%s)\nThis release contains **%s** artifacts with a total size of **%s**:" \
+            "$RELEASE_BODY" \
+            "${{ steps.get_artifacts.outputs.artifact_count }}" \
+            "${{ steps.get_artifacts.outputs.artifact_count }}" \
+            "${{ steps.get_artifacts.outputs.total_size_human }}")
 
           # Add artifact list
           ARTIFACT_LIST=""
@@ -282,43 +284,30 @@ This release contains **${{ steps.get_artifacts.outputs.artifact_count }}** arti
                 ARTIFACT_SIZE_HUMAN="${ARTIFACT_SIZE} bytes"
               fi
 
-              ARTIFACT_LIST="${ARTIFACT_LIST}
-- **${ARTIFACT_NAME}** (${ARTIFACT_SIZE_HUMAN})"
+              ARTIFACT_LIST=$(printf "%s\n- **%s** (%s)" "$ARTIFACT_LIST" "$ARTIFACT_NAME" "$ARTIFACT_SIZE_HUMAN")
             done < <(jq -c '.' ./.github/actions/retain-artifacts/artifacts_list.json)
           fi
 
-          RELEASE_BODY="${RELEASE_BODY}${ARTIFACT_LIST}
-
-> 💾 **Retention Period:** Indefinite (GitHub releases)"
+          RELEASE_BODY=$(printf "%s%s\n\n> 💾 **Retention Period:** Indefinite (GitHub releases)" "$RELEASE_BODY" "$ARTIFACT_LIST")
         else
-          RELEASE_BODY="${RELEASE_BODY}
-
-## 📦 Artifacts
-⚠️ No artifacts were found in this pipeline run."
+          RELEASE_BODY=$(printf "%s\n\n## 📦 Artifacts\n⚠️ No artifacts were found in this pipeline run." "$RELEASE_BODY")
         fi
 
         # Add immutable release information
         IMMUTABLE_STATUS="${{ steps.check_immutable.outputs.immutable_enabled }}"
         if [ "$IMMUTABLE_STATUS" = "likely" ] || [ "$IMMUTABLE_STATUS" = "supported" ]; then
-          RELEASE_BODY="${RELEASE_BODY}\n\n## 🔒 Immutable Release Capability"
-          RELEASE_BODY="${RELEASE_BODY}\n⚡ **This repository appears to support GitHub's immutable releases feature.**"
-          RELEASE_BODY="${RELEASE_BODY}\n\n> **Immutable releases provide:**"
-          RELEASE_BODY="${RELEASE_BODY}\n> • Git tags cannot be moved or deleted after publication"
-          RELEASE_BODY="${RELEASE_BODY}\n> • Release assets cannot be modified or deleted"
-          RELEASE_BODY="${RELEASE_BODY}\n> • Automatic generation of release attestations"
-          RELEASE_BODY="${RELEASE_BODY}\n> • Protection against repository resurrection attacks"
-          RELEASE_BODY="${RELEASE_BODY}\n>"
-          RELEASE_BODY="${RELEASE_BODY}\n> Assessment: **${IMMUTABLE_STATUS}** based on \`${{ steps.check_immutable.outputs.immutable_reasons }}\`"
-          RELEASE_BODY="${RELEASE_BODY}\n>\n> 📖 [Learn more about immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)"
+          RELEASE_BODY=$(printf "%s\n\n## 🔒 Immutable Release Capability\n⚡ **This repository appears to support GitHub's immutable releases feature.**\n\n> **Immutable releases provide:**\n> • Git tags cannot be moved or deleted after publication\n> • Release assets cannot be modified or deleted\n> • Automatic generation of release attestations\n> • Protection against repository resurrection attacks\n>\n> Assessment: **%s** based on \`%s\`\n>\n> 📖 [Learn more about immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)" \
+            "$RELEASE_BODY" \
+            "$IMMUTABLE_STATUS" \
+            "${{ steps.check_immutable.outputs.immutable_reasons }}")
         elif [ "$IMMUTABLE_STATUS" = "unknown" ]; then
-          RELEASE_BODY="${RELEASE_BODY}\n\n## 🔒 Release Integrity"
-          RELEASE_BODY="${RELEASE_BODY}\n🛡️ **This release provides standard GitHub release integrity.**"
-          RELEASE_BODY="${RELEASE_BODY}\n\n> Immutable releases capability could not be determined for this repository."
+          RELEASE_BODY=$(printf "%s\n\n## 🔒 Release Integrity\n🛡️ **This release provides standard GitHub release integrity.**\n\n> Immutable releases capability could not be determined for this repository." \
+            "$RELEASE_BODY")
         fi
 
         # Add footer
-        RELEASE_BODY="${RELEASE_BODY}\n\n---"
-        RELEASE_BODY="${RELEASE_BODY}\n*🤖 This release was created automatically by the [retain_pipeline_run](https://github.com/NovoNordisk-OpenSource/retain_pipeline_run) action*"
+        RELEASE_BODY=$(printf "%s\n\n---\n*🤖 This release was created automatically by the [retain_pipeline_run](https://github.com/NovoNordisk-OpenSource/retain_pipeline_run) action*" \
+          "$RELEASE_BODY")
 
         # Set outputs
         echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
