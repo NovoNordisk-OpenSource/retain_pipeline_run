@@ -375,9 +375,10 @@ runs:
         set +o pipefail  # Don't exit on pipe failures
         echo "📥 Downloading and attaching ${{ steps.get_artifacts.outputs.artifact_count }} artifacts to release..."
 
-        # Create temporary directory for artifacts
+        # Create temporary directory for artifacts but stay in workspace for git context
         TEMP_DIR=$(mktemp -d)
-        cd "$TEMP_DIR"
+        echo "📂 Created temp directory: $TEMP_DIR"
+        echo "📍 Working from: $GITHUB_WORKSPACE (maintaining git context)"
 
         SUCCESSFUL_ATTACHMENTS=0
         FAILED_ATTACHMENTS=0
@@ -390,15 +391,16 @@ runs:
 
             echo "📦 Processing artifact: $ARTIFACT_NAME (ID: $ARTIFACT_ID)"
 
-            # Download artifact (with error handling)
-            if gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > "${ARTIFACT_NAME}.zip" 2>/dev/null; then
+            # Download artifact to temp directory (with error handling)
+            ARTIFACT_FILE="$TEMP_DIR/${ARTIFACT_NAME}.zip"
+            if gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > "$ARTIFACT_FILE" 2>/dev/null; then
               echo "  ✅ Downloaded: ${ARTIFACT_NAME}.zip"
 
-              # Attach to release with comprehensive error reporting
-              echo "  🔄 Attempting upload: ${ARTIFACT_NAME}.zip ($(ls -lh "${ARTIFACT_NAME}.zip" | awk '{print $5}'))"
-              echo "  📋 Upload command: gh release upload ${{ steps.generate_release_info.outputs.release_tag }} ${ARTIFACT_NAME}.zip"
+              # Attach to release with comprehensive error reporting (from workspace directory)
+              echo "  🔄 Attempting upload: ${ARTIFACT_NAME}.zip ($(ls -lh "$ARTIFACT_FILE" | awk '{print $5}'))"
+              echo "  📋 Upload command: gh release upload ${{ steps.generate_release_info.outputs.release_tag }} $ARTIFACT_FILE"
 
-              UPLOAD_OUTPUT=$(gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "${ARTIFACT_NAME}.zip" 2>&1)
+              UPLOAD_OUTPUT=$(gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "$ARTIFACT_FILE" 2>&1)
               UPLOAD_EXIT_CODE=$?
 
               if [ $UPLOAD_EXIT_CODE -eq 0 ]; then
@@ -409,11 +411,13 @@ runs:
                 echo "  🔍 Exit code: $UPLOAD_EXIT_CODE"
                 echo "  📝 Full error output:"
                 echo "$UPLOAD_OUTPUT" | sed 's/^/     /'
-                echo "  📂 File info: $(ls -la "${ARTIFACT_NAME}.zip" 2>/dev/null || echo 'File not found')"
+                echo "  📂 File info: $(ls -la "$ARTIFACT_FILE" 2>/dev/null || echo 'File not found')"
+                echo "  📍 Current directory: $(pwd)"
+                echo "  🔧 Git status: $(git status --porcelain 2>/dev/null || echo 'Not a git repo')"
                 ((FAILED_ATTACHMENTS++))
               fi
               # Clean up downloaded file
-              rm -f "${ARTIFACT_NAME}.zip"
+              rm -f "$ARTIFACT_FILE"
             else
               echo "  ❌ Failed to download artifact: $ARTIFACT_NAME"
               ((FAILED_ATTACHMENTS++))
