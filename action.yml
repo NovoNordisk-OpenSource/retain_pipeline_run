@@ -250,20 +250,23 @@ runs:
           RELEASE_NAME="${{ inputs.release_name }}"
         fi
 
-        # Generate comprehensive release body
-        RELEASE_BODY="${{ inputs.release_body }}"
-        RELEASE_BODY="${RELEASE_BODY}\n\n## 📋 Pipeline Information"
-        RELEASE_BODY="${RELEASE_BODY}\n- **Run ID:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-        RELEASE_BODY="${RELEASE_BODY}\n- **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})"
-        RELEASE_BODY="${RELEASE_BODY}\n- **Branch:** \`${{ github.ref_name }}\`"
-        RELEASE_BODY="${RELEASE_BODY}\n- **Workflow:** \`${{ github.workflow }}\`"
-        RELEASE_BODY="${RELEASE_BODY}\n- **Triggered by:** \`${{ github.event_name }}\`"
-        RELEASE_BODY="${RELEASE_BODY}\n- **Actor:** @${{ github.actor }}"
-        RELEASE_BODY="${RELEASE_BODY}\n- **Created:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        # Generate comprehensive release body using proper newlines
+        RELEASE_BODY="${{ inputs.release_body }}
+
+## 📋 Pipeline Information
+- **Run ID:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+- **Commit:** [\`${{ github.sha }}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+- **Branch:** \`${{ github.ref_name }}\`
+- **Workflow:** \`${{ github.workflow }}\`
+- **Triggered by:** \`${{ github.event_name }}\`
+- **Actor:** @${{ github.actor }}
+- **Created:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
         if [ "${{ steps.get_artifacts.outputs.artifact_count }}" -gt 0 ]; then
-          RELEASE_BODY="${RELEASE_BODY}\n\n## 📦 Artifacts (${{ steps.get_artifacts.outputs.artifact_count }})"
-          RELEASE_BODY="${RELEASE_BODY}\nThis release contains **${{ steps.get_artifacts.outputs.artifact_count }}** artifacts with a total size of **${{ steps.get_artifacts.outputs.total_size_human }}**:"
+          RELEASE_BODY="${RELEASE_BODY}
+
+## 📦 Artifacts (${{ steps.get_artifacts.outputs.artifact_count }})
+This release contains **${{ steps.get_artifacts.outputs.artifact_count }}** artifacts with a total size of **${{ steps.get_artifacts.outputs.total_size_human }}**:"
 
           # Add artifact list
           ARTIFACT_LIST=""
@@ -279,14 +282,19 @@ runs:
                 ARTIFACT_SIZE_HUMAN="${ARTIFACT_SIZE} bytes"
               fi
 
-              ARTIFACT_LIST="${ARTIFACT_LIST}\n- **${ARTIFACT_NAME}** (${ARTIFACT_SIZE_HUMAN})"
+              ARTIFACT_LIST="${ARTIFACT_LIST}
+- **${ARTIFACT_NAME}** (${ARTIFACT_SIZE_HUMAN})"
             done < <(jq -c '.' ./.github/actions/retain-artifacts/artifacts_list.json)
           fi
 
-          RELEASE_BODY="${RELEASE_BODY}${ARTIFACT_LIST}"
-          RELEASE_BODY="${RELEASE_BODY}\n\n> 💾 **Retention Period:** Indefinite (GitHub releases)"
+          RELEASE_BODY="${RELEASE_BODY}${ARTIFACT_LIST}
+
+> 💾 **Retention Period:** Indefinite (GitHub releases)"
         else
-          RELEASE_BODY="${RELEASE_BODY}\n\n## 📦 Artifacts\n⚠️ No artifacts were found in this pipeline run."
+          RELEASE_BODY="${RELEASE_BODY}
+
+## 📦 Artifacts
+⚠️ No artifacts were found in this pipeline run."
         fi
 
         # Add immutable release information
