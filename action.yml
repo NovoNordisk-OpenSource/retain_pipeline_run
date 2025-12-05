@@ -394,14 +394,22 @@ runs:
             if gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > "${ARTIFACT_NAME}.zip" 2>/dev/null; then
               echo "  ✅ Downloaded: ${ARTIFACT_NAME}.zip"
 
-              # Attach to release with detailed error reporting
+              # Attach to release with comprehensive error reporting
+              echo "  🔄 Attempting upload: ${ARTIFACT_NAME}.zip ($(ls -lh "${ARTIFACT_NAME}.zip" | awk '{print $5}'))"
+              echo "  📋 Upload command: gh release upload ${{ steps.generate_release_info.outputs.release_tag }} ${ARTIFACT_NAME}.zip"
+
               UPLOAD_OUTPUT=$(gh release upload "${{ steps.generate_release_info.outputs.release_tag }}" "${ARTIFACT_NAME}.zip" 2>&1)
-              if [ $? -eq 0 ]; then
+              UPLOAD_EXIT_CODE=$?
+
+              if [ $UPLOAD_EXIT_CODE -eq 0 ]; then
                 echo "  ✅ Attached: ${ARTIFACT_NAME}.zip to release"
                 ((SUCCESSFUL_ATTACHMENTS++))
               else
                 echo "  ❌ Failed to attach: ${ARTIFACT_NAME}.zip to release"
-                echo "  Error details: $UPLOAD_OUTPUT"
+                echo "  🔍 Exit code: $UPLOAD_EXIT_CODE"
+                echo "  📝 Full error output:"
+                echo "$UPLOAD_OUTPUT" | sed 's/^/     /'
+                echo "  📂 File info: $(ls -la "${ARTIFACT_NAME}.zip" 2>/dev/null || echo 'File not found')"
                 ((FAILED_ATTACHMENTS++))
               fi
               # Clean up downloaded file
@@ -425,6 +433,27 @@ runs:
         # Set output for summary
         echo "successful_attachments=$SUCCESSFUL_ATTACHMENTS" >> $GITHUB_OUTPUT
         echo "failed_attachments=$FAILED_ATTACHMENTS" >> $GITHUB_OUTPUT
+
+        # CRITICAL: Fail the workflow if no artifacts were successfully uploaded
+        if [ "$SUCCESSFUL_ATTACHMENTS" -eq 0 ] && [ "${{ steps.get_artifacts.outputs.artifact_count }}" -gt 0 ]; then
+          echo ""
+          echo "🚨 CRITICAL FAILURE: No artifacts were successfully uploaded to release!"
+          echo "This violates QMS compliance requirements for artifact retention."
+          echo ""
+          echo "Required for compliance:"
+          echo "- All pipeline artifacts must be retained for audit purposes"
+          echo "- 7-year retention period as per regulatory requirements"
+          echo ""
+          echo "Action: This workflow is failing to ensure compliance standards are met."
+          exit 1
+        fi
+
+        # WARN: Partial failure if some uploads failed
+        if [ "$FAILED_ATTACHMENTS" -gt 0 ]; then
+          echo ""
+          echo "⚠️ WARNING: Some artifacts failed to upload ($FAILED_ATTACHMENTS failed)"
+          echo "This may impact QMS compliance. Please investigate upload errors."
+        fi
 
     - name: Generate action summary
       shell: bash
