@@ -206,7 +206,6 @@ runs:
                     echo "VALIDATION_APPROVER=$APPROVER" > /tmp/validation_approval
                     echo "VALIDATION_TIME=$FORMATTED_TIME" >> /tmp/validation_approval
                   fi
-                fi
               fi
             fi
           fi
@@ -231,7 +230,6 @@ runs:
                     echo "PRODUCTION_APPROVER=$APPROVER" > /tmp/production_approval
                     echo "PRODUCTION_TIME=$FORMATTED_TIME" >> /tmp/production_approval
                   fi
-                fi
               fi
             fi
           fi
