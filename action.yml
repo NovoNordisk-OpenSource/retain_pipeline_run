@@ -188,53 +188,55 @@ runs:
           # Process validation approval
           if [ -n "$VALIDATION_JOB" ] && [ -n "$DEPLOYMENTS" ]; then
             echo "  ✅ Processing validation approval..."
-            echo "$DEPLOYMENTS" | while IFS= read -r deployment; do
-              if [ -n "$deployment" ]; then
-                DEPLOYMENT_ID=$(echo "$deployment" | jq -r '.id')
-                STATUSES=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses" 2>/dev/null)
 
-                if [ -n "$STATUSES" ]; then
-                  APPROVER_INFO=$(echo "$STATUSES" | jq -r '.[] | select(.state == "success") | {creator: .creator.login, created_at: .created_at}' | head -1)
-                  if [ -n "$APPROVER_INFO" ] && [ "$APPROVER_INFO" != "null" ]; then
-                    APPROVER=$(echo "$APPROVER_INFO" | jq -r '.creator')
-                    APPROVAL_TIME=$(echo "$APPROVER_INFO" | jq -r '.created_at')
+            # Get deployment ID directly (no subshell)
+            DEPLOYMENT_ID=$(echo "$DEPLOYMENTS" | jq -r '.id')
+            if [ -n "$DEPLOYMENT_ID" ] && [ "$DEPLOYMENT_ID" != "null" ]; then
+              echo "    📋 Checking deployment $DEPLOYMENT_ID"
+              STATUSES=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses" 2>/dev/null)
 
-                    if [ -n "$APPROVER" ] && [ "$APPROVER" != "null" ]; then
-                      FORMATTED_TIME=$(date -d "$APPROVAL_TIME" -u '+%Y-%m-%d %H:%M:%S GMT' 2>/dev/null || echo "$APPROVAL_TIME")
-                      echo "VALIDATION_APPROVER=$APPROVER" > /tmp/validation_approval
-                      echo "VALIDATION_TIME=$FORMATTED_TIME" >> /tmp/validation_approval
-                      break
-                    fi
+              if [ -n "$STATUSES" ]; then
+                APPROVER_INFO=$(echo "$STATUSES" | jq -r '.[] | select(.state == "success") | {creator: .creator.login, created_at: .created_at}' | head -1)
+                if [ -n "$APPROVER_INFO" ] && [ "$APPROVER_INFO" != "null" ]; then
+                  APPROVER=$(echo "$APPROVER_INFO" | jq -r '.creator')
+                  APPROVAL_TIME=$(echo "$APPROVER_INFO" | jq -r '.created_at')
+
+                  if [ -n "$APPROVER" ] && [ "$APPROVER" != "null" ]; then
+                    echo "    ✅ Found validation approver: $APPROVER at $APPROVAL_TIME"
+                    FORMATTED_TIME=$(date -d "$APPROVAL_TIME" -u '+%Y-%m-%d %H:%M:%S GMT' 2>/dev/null || echo "$APPROVAL_TIME")
+                    echo "VALIDATION_APPROVER=$APPROVER" > /tmp/validation_approval
+                    echo "VALIDATION_TIME=$FORMATTED_TIME" >> /tmp/validation_approval
                   fi
                 fi
               fi
-            done
+            fi
           fi
 
           # Process production approval
           if [ -n "$PRODUCTION_JOB" ] && [ -n "$DEPLOYMENTS" ]; then
             echo "  ✅ Processing production approval..."
-            echo "$DEPLOYMENTS" | while IFS= read -r deployment; do
-              if [ -n "$deployment" ]; then
-                DEPLOYMENT_ID=$(echo "$deployment" | jq -r '.id')
-                STATUSES=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses" 2>/dev/null)
 
-                if [ -n "$STATUSES" ]; then
-                  APPROVER_INFO=$(echo "$STATUSES" | jq -r '.[] | select(.state == "success") | {creator: .creator.login, created_at: .created_at}' | tail -1)
-                  if [ -n "$APPROVER_INFO" ] && [ "$APPROVER_INFO" != "null" ]; then
-                    APPROVER=$(echo "$APPROVER_INFO" | jq -r '.creator')
-                    APPROVAL_TIME=$(echo "$APPROVER_INFO" | jq -r '.created_at')
+            # Get deployment ID directly (no subshell)
+            DEPLOYMENT_ID=$(echo "$DEPLOYMENTS" | jq -r '.id')
+            if [ -n "$DEPLOYMENT_ID" ] && [ "$DEPLOYMENT_ID" != "null" ]; then
+              STATUSES=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses" 2>/dev/null)
 
-                    if [ -n "$APPROVER" ] && [ "$APPROVER" != "null" ]; then
-                      FORMATTED_TIME=$(date -d "$APPROVAL_TIME" -u '+%Y-%m-%d %H:%M:%S GMT' 2>/dev/null || echo "$APPROVAL_TIME")
-                      echo "PRODUCTION_APPROVER=$APPROVER" > /tmp/production_approval
-                      echo "PRODUCTION_TIME=$FORMATTED_TIME" >> /tmp/production_approval
-                      break
-                    fi
+              if [ -n "$STATUSES" ]; then
+                # Use tail -1 for production (later approval in same environment)
+                APPROVER_INFO=$(echo "$STATUSES" | jq -r '.[] | select(.state == "success") | {creator: .creator.login, created_at: .created_at}' | tail -1)
+                if [ -n "$APPROVER_INFO" ] && [ "$APPROVER_INFO" != "null" ]; then
+                  APPROVER=$(echo "$APPROVER_INFO" | jq -r '.creator')
+                  APPROVAL_TIME=$(echo "$APPROVER_INFO" | jq -r '.created_at')
+
+                  if [ -n "$APPROVER" ] && [ "$APPROVER" != "null" ]; then
+                    echo "    ✅ Found production approver: $APPROVER at $APPROVAL_TIME"
+                    FORMATTED_TIME=$(date -d "$APPROVAL_TIME" -u '+%Y-%m-%d %H:%M:%S GMT' 2>/dev/null || echo "$APPROVAL_TIME")
+                    echo "PRODUCTION_APPROVER=$APPROVER" > /tmp/production_approval
+                    echo "PRODUCTION_TIME=$FORMATTED_TIME" >> /tmp/production_approval
                   fi
                 fi
               fi
-            done
+            fi
           fi
 
           # Build approval information string
