@@ -166,9 +166,103 @@ runs:
           RELEASE_NAME="${{ inputs.release_name }}"
         fi
 
+        # Get workflow job approvals information
+        APPROVAL_INFO=""
+        set +e
+
+        echo "🔍 Checking for approval information..."
+
+        # Get workflow jobs for this run
+        JOBS_DATA=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" 2>/dev/null)
+
+        if [ -n "$JOBS_DATA" ]; then
+          # Look for validation approval job
+          VALIDATION_JOB=$(echo "$JOBS_DATA" | jq -r '.jobs[] | select(.name == "verification_report_approval_by_so_or_delegate") | select(.conclusion == "success")' 2>/dev/null)
+
+          # Look for production approval job
+          PRODUCTION_JOB=$(echo "$JOBS_DATA" | jq -r '.jobs[] | select(.name == "p_verification_report_approval_by_so_or_delegate") | select(.conclusion == "success")' 2>/dev/null)
+
+          # Get environment deployments for this workflow run
+          DEPLOYMENTS=$(gh api "repos/${{ github.repository }}/deployments" --jq ".[] | select(.sha == \"${{ github.sha }}\") | select(.environment | test(\"System-Manager-Approval\"; \"i\"))" 2>/dev/null)
+
+          # Process validation approval
+          if [ -n "$VALIDATION_JOB" ] && [ -n "$DEPLOYMENTS" ]; then
+            echo "  ✅ Processing validation approval..."
+            echo "$DEPLOYMENTS" | while IFS= read -r deployment; do
+              if [ -n "$deployment" ]; then
+                DEPLOYMENT_ID=$(echo "$deployment" | jq -r '.id')
+                STATUSES=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses" 2>/dev/null)
+
+                if [ -n "$STATUSES" ]; then
+                  APPROVER_INFO=$(echo "$STATUSES" | jq -r '.[] | select(.state == "success") | {creator: .creator.login, created_at: .created_at}' | head -1)
+                  if [ -n "$APPROVER_INFO" ] && [ "$APPROVER_INFO" != "null" ]; then
+                    APPROVER=$(echo "$APPROVER_INFO" | jq -r '.creator')
+                    APPROVAL_TIME=$(echo "$APPROVER_INFO" | jq -r '.created_at')
+
+                    if [ -n "$APPROVER" ] && [ "$APPROVER" != "null" ]; then
+                      FORMATTED_TIME=$(date -d "$APPROVAL_TIME" -u '+%Y-%m-%d %H:%M:%S GMT' 2>/dev/null || echo "$APPROVAL_TIME")
+                      echo "VALIDATION_APPROVER=$APPROVER" > /tmp/validation_approval
+                      echo "VALIDATION_TIME=$FORMATTED_TIME" >> /tmp/validation_approval
+                      break
+                    fi
+                  fi
+                fi
+              fi
+            done
+          fi
+
+          # Process production approval
+          if [ -n "$PRODUCTION_JOB" ] && [ -n "$DEPLOYMENTS" ]; then
+            echo "  ✅ Processing production approval..."
+            echo "$DEPLOYMENTS" | while IFS= read -r deployment; do
+              if [ -n "$deployment" ]; then
+                DEPLOYMENT_ID=$(echo "$deployment" | jq -r '.id')
+                STATUSES=$(gh api "repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses" 2>/dev/null)
+
+                if [ -n "$STATUSES" ]; then
+                  APPROVER_INFO=$(echo "$STATUSES" | jq -r '.[] | select(.state == "success") | {creator: .creator.login, created_at: .created_at}' | tail -1)
+                  if [ -n "$APPROVER_INFO" ] && [ "$APPROVER_INFO" != "null" ]; then
+                    APPROVER=$(echo "$APPROVER_INFO" | jq -r '.creator')
+                    APPROVAL_TIME=$(echo "$APPROVER_INFO" | jq -r '.created_at')
+
+                    if [ -n "$APPROVER" ] && [ "$APPROVER" != "null" ]; then
+                      FORMATTED_TIME=$(date -d "$APPROVAL_TIME" -u '+%Y-%m-%d %H:%M:%S GMT' 2>/dev/null || echo "$APPROVAL_TIME")
+                      echo "PRODUCTION_APPROVER=$APPROVER" > /tmp/production_approval
+                      echo "PRODUCTION_TIME=$FORMATTED_TIME" >> /tmp/production_approval
+                      break
+                    fi
+                  fi
+                fi
+              fi
+            done
+          fi
+
+          # Build approval information string
+          if [ -f /tmp/validation_approval ]; then
+            source /tmp/validation_approval
+            APPROVAL_INFO="${APPROVAL_INFO}\n\nVerification report from the validation environment was approved by @${VALIDATION_APPROVER} as SO or Delegate at $VALIDATION_TIME"
+            rm -f /tmp/validation_approval
+          fi
+
+          if [ -f /tmp/production_approval ]; then
+            source /tmp/production_approval
+            APPROVAL_INFO="${APPROVAL_INFO}\n\nVerification report from the production environment was approved by @${PRODUCTION_APPROVER} as SO or Delegate at $PRODUCTION_TIME"
+            rm -f /tmp/production_approval
+          fi
+        fi
+
+        set -e
+
+        if [ -n "$APPROVAL_INFO" ]; then
+          echo "✅ Approval information captured"
+        else
+          echo "ℹ️ No approval information found"
+        fi
+
         # Generate comprehensive release body using proper newlines
-        RELEASE_BODY=$(printf "%s\n\n## 📋 Pipeline Information\n- **Run ID:** [%s](%s)\n- **Commit:** [\`%s\`](%s)\n- **Branch:** \`%s\`\n- **Workflow:** \`%s\`\n- **Triggered by:** \`%s\`\n- **Actor:** @%s\n- **Created:** %s" \
+        RELEASE_BODY=$(printf "%s%s\n\n## 📋 Pipeline Information\n- **Run ID:** [%s](%s)\n- **Commit:** [\`%s\`](%s)\n- **Branch:** \`%s\`\n- **Workflow:** \`%s\`\n- **Triggered by:** \`%s\`\n- **Actor:** @%s\n- **Created:** %s" \
           "${{ inputs.release_body }}" \
+          "$APPROVAL_INFO" \
           "${{ github.run_id }}" \
           "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
           "${{ github.sha }}" \
