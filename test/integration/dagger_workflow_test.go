@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"dagger.io/dagger"
@@ -32,12 +33,18 @@ func TestRetainPipelineRunActionWithDagger(t *testing.T) {
 	}
 	defer client.Close()
 
+	// Get absolute path to repository root (Dagger requires absolute paths)
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatalf("Failed to get absolute path to repository root: %v", err)
+	}
+
 	// Create test container
 	testContainer := client.Container().From("ubuntu:22.04").
 		WithEnvVariable("DEBIAN_FRONTEND", "noninteractive").
 		WithExec([]string{"apt-get", "update"}).
 		WithExec([]string{"apt-get", "install", "-y", "curl", "jq", "git"}).
-		WithDirectory("/action", client.Host().Directory("../..")).
+		WithDirectory("/action", client.Host().Directory(repoRoot)).
 		WithWorkdir("/action")
 
 	// Test action.yml validation
