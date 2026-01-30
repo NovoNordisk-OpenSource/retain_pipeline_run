@@ -198,19 +198,17 @@ jobs:
     steps:
       - name: Test released action
         id: test_release
-        uses: NovoNordisk-OpenSource/retain_pipeline_run@v${{ needs.validate_tag.outputs.version }}
+        uses: NovoNordisk-OpenSource/retain_pipeline_run@main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_name: "Release Test - v${{ needs.validate_tag.outputs.version }}"
+          release_name: "Release Test"
           release_body: |
             ## 🧪 Release Test
 
-            This release was created to test the newly released retain-artifacts action v${{ needs.validate_tag.outputs.version }}.
+            This release was created to test the newly released action.
 
             **Test Details:**
-            - Release Version: v${{ needs.validate_tag.outputs.version }}
             - Test Run: ${{ github.run_id }}
-            - Prerelease: ${{ needs.validate_tag.outputs.is_prerelease }}
 
             This test verifies that the action works correctly after release.
           prerelease: true
