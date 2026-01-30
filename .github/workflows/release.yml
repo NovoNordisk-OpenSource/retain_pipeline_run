@@ -115,7 +115,7 @@ jobs:
           echo '```yaml' >> release-artifacts/RELEASE_NOTES.md
           echo 'steps:' >> release-artifacts/RELEASE_NOTES.md
           echo '  - name: Retain Pipeline Artifacts' >> release-artifacts/RELEASE_NOTES.md
-          echo '    uses: innersource-nn/retain-artifacts@v${{ needs.validate_tag.outputs.version }}' >> release-artifacts/RELEASE_NOTES.md
+          echo '    uses: NovoNordisk-OpenSource/retain_pipeline_run@v${{ needs.validate_tag.outputs.version }}' >> release-artifacts/RELEASE_NOTES.md
           echo '    with:' >> release-artifacts/RELEASE_NOTES.md
           echo '      github_token: ${{ secrets.GITHUB_TOKEN }}' >> release-artifacts/RELEASE_NOTES.md
           echo '```' >> release-artifacts/RELEASE_NOTES.md
@@ -177,7 +177,7 @@ jobs:
     steps:
       - name: Test released action
         id: test_release
-        uses: innersource-nn/retain-artifacts@v${{ needs.validate_tag.outputs.version }}
+        uses: NovoNordisk-OpenSource/retain_pipeline_run@v${{ needs.validate_tag.outputs.version }}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           release_name: "Release Test - v${{ needs.validate_tag.outputs.version }}"
@@ -250,7 +250,7 @@ jobs:
           echo "### Release Details" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: v${{ needs.validate_tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Type**: ${{ needs.validate_tag.outputs.is_prerelease == 'true' && 'Pre-release' || 'Stable Release' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release URL**: [View Release](https://github.com/innersource-nn/retain-artifacts/releases/tag/v${{ needs.validate_tag.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL**: [View Release](https://github.com/NovoNordisk-OpenSource/retain_pipeline_run/releases/tag/v${{ needs.validate_tag.outputs.version }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ✅ Completed Steps" >> $GITHUB_STEP_SUMMARY
           echo "- Version validation" >> $GITHUB_STEP_SUMMARY
@@ -267,5 +267,5 @@ jobs:
           echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
           echo "The action is now available for use:" >> $GITHUB_STEP_SUMMARY
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          echo 'uses: innersource-nn/retain-artifacts@v${{ needs.validate_tag.outputs.version }}' >> $GITHUB_STEP_SUMMARY
+          echo 'uses: NovoNordisk-OpenSource/retain_pipeline_run@v${{ needs.validate_tag.outputs.version }}' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
