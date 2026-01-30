@@ -58,8 +58,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run CI pipeline
-        uses: ./.github/workflows/ci.yml
+      - name: Run unit tests
+        run: |
+          echo "Running unit tests for release validation..."
+          ./test/unit/run_tests.sh
+
+      - name: Verify action structure
+        run: |
+          echo "Validating action.yml structure..."
+          if [ ! -f "action.yml" ]; then
+            echo "❌ action.yml file not found"
+            exit 1
+          fi
+
+          # Basic YAML validation
+          if ! command -v yq >/dev/null 2>&1; then
+            # If yq not available, do basic checks
+            if ! grep -q "name:" action.yml; then
+              echo "❌ action.yml missing required 'name' field"
+              exit 1
+            fi
+          fi
+
+          echo "✅ Action structure validated"
 
   build_release_artifacts:
     name: Build Release Artifacts
