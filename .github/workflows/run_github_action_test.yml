@@ -52,3 +52,36 @@ jobs:
         run: |
           echo "✅ GitHub Action test completed successfully"
           echo "Check the releases page to verify artifacts were retained"
+
+      - name: Clean up old test releases
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🧹 Cleaning up old test releases..."
+
+          # Cross-platform date calculation (works on both GNU date and BSD date)
+          if date -v-7d > /dev/null 2>&1; then
+              # BSD date (GitHub Actions runners actually use Linux, but keeping for robustness)
+              CUTOFF_TIME=$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
+          else
+              # GNU date (Linux)
+              CUTOFF_TIME=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          fi
+
+          echo "Deleting test releases older than: $CUTOFF_TIME"
+
+          # Delete old CI test releases (older than 7 days) to prevent buildup
+          gh release list --limit 100 --json tagName,name,createdAt,prerelease | \
+          jq -r --arg cutoff "$CUTOFF_TIME" '.[] |
+            select(.name | test("CI Test Release|Pipeline Artifacts - Run")) |
+            select(.createdAt < $cutoff) |
+            .tagName' | \
+          while read -r tag; do
+            if [ -n "$tag" ]; then
+              echo "🗑️ Deleting old test release: $tag"
+              gh release delete "$tag" --yes || echo "⚠️ Failed to delete $tag (may already be deleted)"
+            fi
+          done
+
+          echo "✅ Cleanup completed"

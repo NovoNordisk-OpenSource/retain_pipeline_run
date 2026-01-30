@@ -147,8 +147,17 @@ runs:
           CURRENT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "")
 
           if [ -n "$CURRENT_TAG" ]; then
-            RELEASE_TAG="$CURRENT_TAG"
-            echo "✅ Using current git tag: $RELEASE_TAG"
+            # Check if a release already exists for this tag to avoid collisions
+            if gh release view "$CURRENT_TAG" >/dev/null 2>&1; then
+              echo "⚠️ Release already exists for git tag: $CURRENT_TAG"
+              echo "🔄 Generating unique tag to avoid collision..."
+              TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+              RELEASE_TAG="pipeline-${{ github.run_id }}-$TIMESTAMP"
+              echo "✅ Using generated unique tag: $RELEASE_TAG"
+            else
+              RELEASE_TAG="$CURRENT_TAG"
+              echo "✅ Using current git tag: $RELEASE_TAG"
+            fi
           else
             # Fallback to timestamp-based tag if no git tag exists
             TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
@@ -157,6 +166,12 @@ runs:
           fi
         else
           RELEASE_TAG="${{ inputs.release_tag }}"
+          # Also check for collisions on user-provided tags
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "❌ ERROR: Release already exists for provided tag: $RELEASE_TAG"
+            echo "Please use a different release_tag or let the action generate one automatically."
+            exit 1
+          fi
         fi
 
         # Generate release name if not provided
