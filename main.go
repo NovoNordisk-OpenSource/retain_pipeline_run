@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -157,13 +156,13 @@ func initLogger() zerolog.Logger {
 	multi := zerolog.New(multiWriter).With().Timestamp().Logger()
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	debug := flag.Bool("debug", false, "sets log level to debug")
-	flag.Parse()
-
 	// Default level
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	if *debug {
+
+	// Enable debug mode via environment variable (CI-friendly)
+	if os.Getenv("DEBUG") == "true" || os.Getenv("DEBUG") == "1" {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		log.Debug().Msg("Debug logging enabled via DEBUG environment variable")
 	}
 
 	return multi
