@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"dagger.io/dagger"
@@ -16,6 +17,13 @@ func main() {
 	ctx := context.Background()
 	log.Logger = initLogger()
 	log.Info().Msg("---- Testing retain_pipeline_run action ----")
+
+	// Check if Docker is available
+	if _, err := exec.LookPath("docker"); err != nil {
+		log.Warn().Msg("Docker not found in PATH, skipping Dagger tests")
+		log.Info().Msg("To run Dagger tests, please install Docker and ensure it's in your PATH")
+		return
+	}
 
 	if err := testRetainPipelineRunAction(ctx); err != nil {
 		log.Error().Msg(fmt.Sprintln(err))

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"os/exec"
 	"testing"
 
 	"dagger.io/dagger"
@@ -16,6 +17,12 @@ func init() {
 }
 
 func TestRetainPipelineRunActionWithDagger(t *testing.T) {
+	// Check if Docker is available
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("Docker not found in PATH, skipping Dagger tests")
+		return
+	}
+
 	ctx := context.Background()
 
 	// Initialize Dagger client
@@ -88,6 +95,12 @@ func TestRetainPipelineRunActionWithDagger(t *testing.T) {
 }
 
 func TestReleaseTagGeneration(t *testing.T) {
+	// Check if Docker is available
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("Docker not found in PATH, skipping Dagger tests")
+		return
+	}
+
 	ctx := context.Background()
 
 	client, err := dagger.Connect(ctx)

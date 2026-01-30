@@ -2,6 +2,11 @@
 
 # Integration test suite for retain_pipeline_run action
 # Tests the complete action workflow with real GitHub API interactions
+#
+# Prerequisites:
+# - GitHub CLI authenticated with 'workflow' scope: gh auth refresh -h github.com -s workflow
+# - Docker installed (for Dagger tests)
+# - Cross-platform date command compatibility (handled automatically)
 
 set -e
 
@@ -90,7 +95,14 @@ cleanup_test_releases() {
         export GITHUB_TOKEN="$TEST_TOKEN"
 
         # Get test releases created in the last hour
-        CUTOFF_TIME=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
+        # Cross-platform date calculation (works on both GNU date and BSD date)
+        if date -v-1H > /dev/null 2>&1; then
+            # BSD date (macOS)
+            CUTOFF_TIME=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
+        else
+            # GNU date (Linux)
+            CUTOFF_TIME=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
+        fi
 
         gh release list --repo "$TEST_REPO" --limit 50 --json tagName,name,createdAt,prerelease 2>/dev/null | \
         jq -r --arg cutoff "$CUTOFF_TIME" '.[] |

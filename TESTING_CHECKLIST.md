@@ -108,8 +108,15 @@ If tests fail, check:
 
 1. **Permissions**: Workflow has `contents: write`, `actions: read`, `metadata: read`
 2. **Token**: `GITHUB_TOKEN` is available and has correct scopes
-3. **Artifacts**: Previous jobs actually uploaded artifacts
-4. **Logs**: Use `gh run view --log` for detailed error messages
+   - For integration tests that create releases, ensure GitHub CLI has "workflow" scope:
+     ```bash
+     gh auth refresh -h github.com -s workflow
+     ```
+3. **Platform Compatibility**:
+   - On macOS, ensure date command compatibility (fixed in this branch)
+   - For Dagger tests, ensure Docker is installed and in PATH
+4. **Artifacts**: Previous jobs actually uploaded artifacts
+5. **Logs**: Use `gh run view --log` for detailed error messages
 
 ### 📊 **Expected Results**
 
